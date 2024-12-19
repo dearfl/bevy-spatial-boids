@@ -92,7 +92,7 @@ fn setup(
 ) {
     commands.spawn(Camera2dBundle::default());
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Halton sequence for Boid spawns
     let seq = halton::Sequence::new(2)
@@ -111,8 +111,8 @@ fn setup(
         transform.rotate_z(0.0);
 
         let velocity = Velocity(Vec2::new(
-            rng.gen_range(-1.0..1.0),
-            rng.gen_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
         ));
 
         commands.spawn((
@@ -138,7 +138,7 @@ fn setup(
                     ),
                     material: materials.add(
                         // Random color for each boid
-                        Color::hsl(360. * rng.gen::<f32>(), rng.gen(), 0.7),
+                        Color::hsl(360. * rng.random::<f32>(), rng.random(), 0.7),
                     ),
                     transform,
                     ..default()
