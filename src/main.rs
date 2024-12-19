@@ -1,8 +1,9 @@
 use bevy::{
+    color::palettes::css::GRAY,
+    input::common_conditions::input_just_released,
     math::Vec3Swizzles,
     prelude::*,
     render::{mesh::*, render_asset::RenderAssetUsages},
-    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
     tasks::ComputeTaskPool,
 };
 use bevy_spatial::{kdtree::KDTree2, AutomaticUpdate, SpatialAccess, SpatialStructure};
@@ -35,14 +36,14 @@ fn main() {
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     canvas: Some("#bevy_boids_canvas".into()),
-                    resolution: (WINDOW_BOUNDS.x, WINDOW_BOUNDS.y).into(),
+                    resolution: WINDOW_BOUNDS.into(),
                     resizable: true,
                     ..default()
                 }),
                 ..default()
             }),
             // Track boids in the KD-Tree
-            AutomaticUpdate::<SpatialEntity>::new()
+            AutomaticUpdate::<Boid>::new()
                 // TODO: check perf of other tree types
                 .with_spatial_ds(SpatialStructure::KDTree2)
                 .with_frequency(Duration::from_millis(16)),
@@ -54,29 +55,51 @@ fn main() {
             FixedUpdate,
             (flocking_system, velocity_system, movement_system).chain(),
         )
-        .add_systems(Update, (draw_boid_gizmos, bevy::window::close_on_esc))
+        .add_systems(
+            Update,
+            (
+                draw_boid_gizmos,
+                exit.run_if(input_just_released(KeyCode::Escape)),
+            ),
+        )
         .run();
+}
+
+#[derive(Component, Default)]
+struct Velocity(Vec2);
+
+impl Velocity {
+    pub fn random() -> Self {
+        let mut rng = rand::rng();
+        Velocity(Vec2::new(
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+        ))
+    }
 }
 
 // Marker for entities tracked by KDTree
 #[derive(Component, Default)]
-struct SpatialEntity;
+#[require(Velocity, Mesh2d, MeshMaterial2d<ColorMaterial>, Transform)]
+struct Boid;
 
-#[derive(Component)]
-struct Velocity(Vec2);
-
-#[derive(Bundle)]
-struct BoidBundle {
-    mesh: MaterialMesh2dBundle<ColorMaterial>,
-    velocity: Velocity,
-}
-
-impl Default for BoidBundle {
-    fn default() -> Self {
-        Self {
-            mesh: Default::default(),
-            velocity: Velocity(Vec2::default()),
-        }
+impl Boid {
+    pub fn mesh(meshes: &mut ResMut<Assets<Mesh>>) -> Mesh2d {
+        let mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![
+                [-0.5, 0.5, 0.0],
+                [1.0, 0.0, 0.0],
+                [-0.5, -0.5, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        .with_inserted_indices(Indices::U32(vec![1, 3, 0, 1, 2, 3]));
+        Mesh2d(meshes.add(mesh))
     }
 }
 
@@ -88,9 +111,9 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    window: Query<&Window>,
+    window: Single<&Window>,
 ) {
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2d);
 
     let mut rng = rand::rng();
 
@@ -99,83 +122,54 @@ fn setup(
         .zip(Sequence::new(3))
         .zip(1..BOID_COUNT);
 
-    let res = &window.single().resolution;
+    let res = &window.resolution;
+    let mesh = Boid::mesh(&mut meshes);
 
-    for ((x, y), _) in seq {
+    for ((x, y), idx) in seq {
         let spawn_x = (x as f32 * res.width()) - res.width() / 2.0;
         let spawn_y = (y as f32 * res.height()) - res.height() / 2.0;
 
+        // give each bird a distinct depth so they overlap in a consistent way
+        let depth = idx as f32 / BOID_COUNT as f32;
         let mut transform =
-            Transform::from_xyz(spawn_x, spawn_y, 0.0).with_scale(Vec3::splat(BOID_SIZE));
+            Transform::from_xyz(spawn_x, spawn_y, depth).with_scale(Vec3::splat(BOID_SIZE));
 
         transform.rotate_z(0.0);
 
-        let velocity = Velocity(Vec2::new(
-            rng.random_range(-1.0..1.0),
-            rng.random_range(-1.0..1.0),
+        let velocity = Velocity::random();
+        let material = MeshMaterial2d(materials.add(
+            // Random color for each boid
+            Color::hsl(360. * rng.random::<f32>(), rng.random(), 0.7),
         ));
 
-        commands.spawn((
-            BoidBundle {
-                mesh: MaterialMesh2dBundle {
-                    mesh: Mesh2dHandle(
-                        meshes.add(
-                            Mesh::new(
-                                PrimitiveTopology::TriangleList,
-                                RenderAssetUsages::default(),
-                            )
-                            .with_inserted_attribute(
-                                Mesh::ATTRIBUTE_POSITION,
-                                vec![
-                                    [-0.5, 0.5, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [-0.5, -0.5, 0.0],
-                                    [0.0, 0.0, 0.0],
-                                ],
-                            )
-                            .with_inserted_indices(Indices::U32(vec![1, 3, 0, 1, 2, 3])),
-                        ),
-                    ),
-                    material: materials.add(
-                        // Random color for each boid
-                        Color::hsl(360. * rng.random::<f32>(), rng.random(), 0.7),
-                    ),
-                    transform,
-                    ..default()
-                },
-                velocity,
-            },
-            SpatialEntity,
-        ));
+        commands.spawn((mesh.clone(), material, velocity, transform, Boid));
     }
 }
 
-fn draw_boid_gizmos(window: Query<&Window>, mut gizmos: Gizmos) {
-    let res = &window.single().resolution;
+fn draw_boid_gizmos(window: Single<&Window>, mut gizmos: Gizmos) {
+    let res = &window.resolution;
 
     gizmos.rect_2d(
-        Vec2::ZERO,
-        0.0,
+        Isometry2d::default(),
         Vec2::new(
             res.width() - BOID_BOUNDARY_SIZE,
             res.height() - BOID_BOUNDARY_SIZE,
         ),
-        Color::GRAY,
+        GRAY,
     );
 }
 
 fn angle_towards(a: Vec2, b: Vec2) -> f32 {
     // https://stackoverflow.com/a/68929139
     let dir = b - a;
-
     dir.y.atan2(dir.x)
 }
 
 fn flocking_dv(
-    kdtree: &Res<KDTree2<SpatialEntity>>,
-    boid_query: &Query<(Entity, &Velocity, &Transform), With<SpatialEntity>>,
+    kdtree: &Res<KDTree2<Boid>>,
+    boid_query: &Query<(Entity, &Velocity, &Transform), With<Boid>>,
     camera: &Query<(&Camera, &GlobalTransform)>,
-    window: &Query<&Window>,
+    window: &Single<&Window>,
     boid: &Entity,
     t0: &&Transform,
 ) -> Vec2 {
@@ -242,22 +236,22 @@ fn flocking_dv(
 
     // Chase the mouse
     let (camera, t_camera) = camera.single();
-    if let Some(c_window) = window.single().cursor_position() {
-        if let Some(c_world) = camera.viewport_to_world_2d(t_camera, c_window) {
+    if let Some(c_window) = window.cursor_position() {
+        if let Ok(c_world) = camera.viewport_to_world_2d(t_camera, c_window) {
             let to_cursor = c_world - t0.translation.xy();
             dv += to_cursor * BOID_MOUSE_CHASE_FACTOR;
-        };
-    };
+        }
+    }
 
     dv
 }
 
 fn flocking_system(
-    boid_query: Query<(Entity, &Velocity, &Transform), With<SpatialEntity>>,
-    kdtree: Res<KDTree2<SpatialEntity>>,
+    boid_query: Query<(Entity, &Velocity, &Transform), With<Boid>>,
+    kdtree: Res<KDTree2<Boid>>,
     mut dv_event_writer: EventWriter<DvEvent>,
     camera: Query<(&Camera, &GlobalTransform)>,
-    window: Query<&Window>,
+    window: Single<&Window>,
 ) {
     let pool = ComputeTaskPool::get();
     let boids = boid_query.iter().collect::<Vec<_>>();
@@ -340,4 +334,8 @@ fn movement_system(mut query: Query<(&mut Velocity, &mut Transform)>) {
         transform.translation.x += velocity.0.x;
         transform.translation.y += velocity.0.y;
     }
+}
+
+fn exit(mut exit: EventWriter<AppExit>) {
+    exit.send(AppExit::Success);
 }
