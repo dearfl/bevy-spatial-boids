@@ -167,8 +167,8 @@ fn draw_boid_gizmos(window: Query<&Window>, mut gizmos: Gizmos) {
 fn angle_towards(a: Vec2, b: Vec2) -> f32 {
     // https://stackoverflow.com/a/68929139
     let dir = b - a;
-    let angle = dir.y.atan2(dir.x);
-    angle
+
+    dir.y.atan2(dir.x)
 }
 
 fn flocking_dv(
@@ -246,9 +246,7 @@ fn flocking_dv(
         if let Some(c_world) = camera.viewport_to_world_2d(t_camera, c_window) {
             let to_cursor = c_world - t0.translation.xy();
             dv += to_cursor * BOID_MOUSE_CHASE_FACTOR;
-        } else {
         };
-    } else {
     };
 
     dv
@@ -263,7 +261,7 @@ fn flocking_system(
 ) {
     let pool = ComputeTaskPool::get();
     let boids = boid_query.iter().collect::<Vec<_>>();
-    let boids_per_thread = (boids.len() + pool.thread_num() - 1) / pool.thread_num();
+    let boids_per_thread = boids.len().div_ceil(pool.thread_num());
 
     // https://docs.rs/bevy/latest/bevy/tasks/struct.ComputeTaskPool.html
     // https://github.com/kvietcong/rusty-boids
