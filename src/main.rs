@@ -1,6 +1,3 @@
-use std::time::Duration;
-use rand::prelude::*;
-use halton::Sequence;
 use bevy::{
     math::Vec3Swizzles,
     prelude::*,
@@ -8,12 +5,10 @@ use bevy::{
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
     tasks::ComputeTaskPool,
 };
-use bevy_spatial::{
-    AutomaticUpdate,
-    kdtree::KDTree2,
-    SpatialAccess,
-    SpatialStructure,
-};
+use bevy_spatial::{kdtree::KDTree2, AutomaticUpdate, SpatialAccess, SpatialStructure};
+use halton::Sequence;
+use rand::prelude::*;
+use std::time::Duration;
 
 const WINDOW_BOUNDS: Vec2 = Vec2::new(800., 400.);
 const NEIGHBOR_CAP: usize = 100;
@@ -55,15 +50,11 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .add_event::<DvEvent>()
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (
-            flocking_system,
-            velocity_system,
-            movement_system,
-        ).chain())
-        .add_systems(Update, (
-            draw_boid_gizmos,
-            bevy::window::close_on_esc,
-        ))
+        .add_systems(
+            FixedUpdate,
+            (flocking_system, velocity_system, movement_system).chain(),
+        )
+        .add_systems(Update, (draw_boid_gizmos, bevy::window::close_on_esc))
         .run();
 }
 
@@ -97,64 +88,69 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    window: Query<&Window>
+    window: Query<&Window>,
 ) {
     commands.spawn(Camera2dBundle::default());
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Halton sequence for Boid spawns
-    let seq = halton::Sequence::new(2).zip(Sequence::new(3))
+    let seq = halton::Sequence::new(2)
+        .zip(Sequence::new(3))
         .zip(1..BOID_COUNT);
 
     let res = &window.single().resolution;
 
     for ((x, y), _) in seq {
-        let spawn_x = (x as f32 *  res.width()) -  res.width() / 2.0;
+        let spawn_x = (x as f32 * res.width()) - res.width() / 2.0;
         let spawn_y = (y as f32 * res.height()) - res.height() / 2.0;
 
-        let mut transform = Transform::from_xyz(spawn_x, spawn_y, 0.0)
-            .with_scale(Vec3::splat(BOID_SIZE));
+        let mut transform =
+            Transform::from_xyz(spawn_x, spawn_y, 0.0).with_scale(Vec3::splat(BOID_SIZE));
 
         transform.rotate_z(0.0);
 
-        let velocity = Velocity(Vec2::new(rng.gen_range(-1.0..1.0),
-                                          rng.gen_range(-1.0..1.0)));
+        let velocity = Velocity(Vec2::new(
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+        ));
 
         commands.spawn((
             BoidBundle {
                 mesh: MaterialMesh2dBundle {
-                    mesh: Mesh2dHandle(meshes.add(
-                        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-                            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![
-                                [-0.5, 0.5, 0.0],
-                                [1.0, 0.0, 0.0],
-                                [-0.5, -0.5, 0.0],
-                                [0.0, 0.0, 0.0],
-                            ])
-                            .with_inserted_indices(Indices::U32(vec![
-                                1, 3, 0,
-                                1, 2, 3,
-                            ]))
-                    )),
+                    mesh: Mesh2dHandle(
+                        meshes.add(
+                            Mesh::new(
+                                PrimitiveTopology::TriangleList,
+                                RenderAssetUsages::default(),
+                            )
+                            .with_inserted_attribute(
+                                Mesh::ATTRIBUTE_POSITION,
+                                vec![
+                                    [-0.5, 0.5, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [-0.5, -0.5, 0.0],
+                                    [0.0, 0.0, 0.0],
+                                ],
+                            )
+                            .with_inserted_indices(Indices::U32(vec![1, 3, 0, 1, 2, 3])),
+                        ),
+                    ),
                     material: materials.add(
                         // Random color for each boid
-                        Color::hsl(360. * rng.gen::<f32>(), rng.gen(), 0.7)
+                        Color::hsl(360. * rng.random::<f32>(), rng.random(), 0.7),
                     ),
                     transform,
                     ..default()
                 },
                 velocity,
             },
-            SpatialEntity
+            SpatialEntity,
         ));
     }
 }
 
-fn draw_boid_gizmos(
-    window: Query<&Window>,
-    mut gizmos: Gizmos,
-) {
+fn draw_boid_gizmos(window: Query<&Window>, mut gizmos: Gizmos) {
     let res = &window.single().resolution;
 
     gizmos.rect_2d(
@@ -164,15 +160,15 @@ fn draw_boid_gizmos(
             res.width() - BOID_BOUNDARY_SIZE,
             res.height() - BOID_BOUNDARY_SIZE,
         ),
-        Color::GRAY
+        Color::GRAY,
     );
 }
 
 fn angle_towards(a: Vec2, b: Vec2) -> f32 {
     // https://stackoverflow.com/a/68929139
     let dir = b - a;
-    let angle = dir.y.atan2(dir.x);
-    angle
+
+    dir.y.atan2(dir.x)
 }
 
 fn flocking_dv(
@@ -192,7 +188,9 @@ fn flocking_dv(
     let mut close_boids = 0;
 
     for (_, entity) in kdtree.k_nearest_neighbour(t0.translation.xy(), NEIGHBOR_CAP) {
-        let Ok((other, v1, t1)) = boid_query.get(entity.unwrap()) else { todo!() };
+        let Ok((other, v1, t1)) = boid_query.get(entity.unwrap()) else {
+            todo!()
+        };
 
         // Don't evaluate against itself
         if *boid == other {
@@ -209,7 +207,11 @@ fn flocking_dv(
 
         // Don't evaluate boids behind
         if let Some(vec_to_norm) = vec_to.try_normalize() {
-            if t0.rotation.angle_between(Quat::from_rotation_arc_2d(Vec2::X, vec_to_norm)) > BOID_FOV {
+            if t0
+                .rotation
+                .angle_between(Quat::from_rotation_arc_2d(Vec2::X, vec_to_norm))
+                > BOID_FOV
+            {
                 continue;
             }
         }
@@ -244,8 +246,8 @@ fn flocking_dv(
         if let Some(c_world) = camera.viewport_to_world_2d(t_camera, c_window) {
             let to_cursor = c_world - t0.translation.xy();
             dv += to_cursor * BOID_MOUSE_CHASE_FACTOR;
-        } else {};
-    } else {};
+        };
+    };
 
     dv
 }
@@ -259,7 +261,7 @@ fn flocking_system(
 ) {
     let pool = ComputeTaskPool::get();
     let boids = boid_query.iter().collect::<Vec<_>>();
-    let boids_per_thread = (boids.len() + pool.thread_num() - 1) / pool.thread_num();
+    let boids_per_thread = boids.len().div_ceil(pool.thread_num());
 
     // https://docs.rs/bevy/latest/bevy/tasks/struct.ComputeTaskPool.html
     // https://github.com/kvietcong/rusty-boids
@@ -274,9 +276,10 @@ fn flocking_system(
                 let mut dv_batch: Vec<DvEvent> = vec![];
 
                 for (boid, _, t0) in chunk {
-                    dv_batch.push(DvEvent(*boid, flocking_dv(
-                        kdtree, boid_query, camera, window, boid, t0,
-                    )));
+                    dv_batch.push(DvEvent(
+                        *boid,
+                        flocking_dv(kdtree, boid_query, camera, window, boid, t0),
+                    ));
                 }
 
                 dv_batch
@@ -293,7 +296,9 @@ fn velocity_system(
     window: Query<&Window>,
 ) {
     for DvEvent(boid, dv) in events.read() {
-        let Ok((mut velocity, transform)) = boids.get_mut(*boid) else { todo!() };
+        let Ok((mut velocity, transform)) = boids.get_mut(*boid) else {
+            todo!()
+        };
 
         velocity.0.x += dv.x;
         velocity.0.y += dv.y;
@@ -329,13 +334,9 @@ fn velocity_system(
     }
 }
 
-fn movement_system(
-    mut query: Query<(&mut Velocity, &mut Transform)>,
-) {
+fn movement_system(mut query: Query<(&mut Velocity, &mut Transform)>) {
     for (velocity, mut transform) in query.iter_mut() {
-        transform.rotation = Quat::from_axis_angle(
-            Vec3::Z, angle_towards(Vec2::ZERO, velocity.0)
-        );
+        transform.rotation = Quat::from_axis_angle(Vec3::Z, angle_towards(Vec2::ZERO, velocity.0));
         transform.translation.x += velocity.0.x;
         transform.translation.y += velocity.0.y;
     }
