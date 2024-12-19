@@ -168,7 +168,7 @@ fn angle_towards(a: Vec2, b: Vec2) -> f32 {
 fn flocking_dv(
     kdtree: &Res<KDTree2<Boid>>,
     boid_query: &Query<(Entity, &Velocity, &Transform), With<Boid>>,
-    camera: &Query<(&Camera, &GlobalTransform)>,
+    camera: &Single<(&Camera, &GlobalTransform)>,
     window: &Single<&Window>,
     boid: &Entity,
     t0: &&Transform,
@@ -235,7 +235,7 @@ fn flocking_dv(
     }
 
     // Chase the mouse
-    let (camera, t_camera) = camera.single();
+    let (camera, t_camera) = **camera;
     if let Some(c_window) = window.cursor_position() {
         if let Ok(c_world) = camera.viewport_to_world_2d(t_camera, c_window) {
             let to_cursor = c_world - t0.translation.xy();
@@ -250,7 +250,7 @@ fn flocking_system(
     boid_query: Query<(Entity, &Velocity, &Transform), With<Boid>>,
     kdtree: Res<KDTree2<Boid>>,
     mut dv_event_writer: EventWriter<DvEvent>,
-    camera: Query<(&Camera, &GlobalTransform)>,
+    camera: Single<(&Camera, &GlobalTransform)>,
     window: Single<&Window>,
 ) {
     let pool = ComputeTaskPool::get();
@@ -287,7 +287,7 @@ fn flocking_system(
 fn velocity_system(
     mut events: EventReader<DvEvent>,
     mut boids: Query<(&mut Velocity, &mut Transform)>,
-    window: Query<&Window>,
+    window: Single<&Window>,
 ) {
     for DvEvent(boid, dv) in events.read() {
         let Ok((mut velocity, transform)) = boids.get_mut(*boid) else {
@@ -297,7 +297,7 @@ fn velocity_system(
         velocity.0.x += dv.x;
         velocity.0.y += dv.y;
 
-        let res = &window.single().resolution;
+        let res = &window.resolution;
 
         let width = (res.width() - BOID_BOUNDARY_SIZE) / 2.;
         let height = (res.height() - BOID_BOUNDARY_SIZE) / 2.;
